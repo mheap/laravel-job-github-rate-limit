@@ -8,6 +8,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Cache;
 
 class QueryGitHub implements ShouldQueue
 {
@@ -30,7 +31,20 @@ class QueryGitHub implements ShouldQueue
      */
     public function handle()
     {
-        $r = GitHub::me()->organizations();
-        dump($r);
+        try {
+            dump(GitHub::me()->organizations());
+        } catch (\Github\Exception\RuntimeException$e) {
+            // If there's an exception, check our rate limit
+            $limits = GitHub::api('rate_limit')->getResources();
+            $reset = $limits['core']->getReset();
+
+            // If there are no more requests available, add a cache entry
+            if ($limits['core']->getRemaining() <= 0) {
+                Cache::add('github-rate-limit-exceeded', $reset, ($reset - time()));
+            }
+
+            // Rethrow the exception to mark the job as failed
+            throw $e;
+        }
     }
 }
